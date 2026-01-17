@@ -4,6 +4,7 @@ import os
 import tempfile
 import subprocess
 import time
+import shutil
 
 st.set_page_config(page_title="YouTube 轉 GIF 工具 (穩定版)", page_icon="🎞️", layout="wide")
 
@@ -21,7 +22,17 @@ LOCAL_FFMPEG = os.path.join(os.getcwd(), "ffmpeg", "bin", "ffmpeg.exe")
 if os.path.exists(LOCAL_FFMPEG):
     FFMPEG_BINARY = LOCAL_FFMPEG
 else:
-    FFMPEG_BINARY = "ffmpeg"
+    # 嘗試在系統路徑中尋找 ffmpeg (適用於 Streamlit Cloud / Linux)
+    system_ffmpeg = shutil.which("ffmpeg")
+    if system_ffmpeg:
+        FFMPEG_BINARY = system_ffmpeg
+    else:
+        FFMPEG_BINARY = "ffmpeg" # 預設值
+
+# 啟動時檢查
+if not os.path.exists(LOCAL_FFMPEG) and not shutil.which("ffmpeg"):
+    st.warning("⚠️ 警告：系統找不到 FFmpeg。請確認 packages.txt 是否已包含 ffmpeg 並且位於 GitHub 儲存庫根目錄。")
+
 
 def process_youtube_to_gif(url, start_time, end_time, width, fps, output_gif):
     duration = end_time - start_time
