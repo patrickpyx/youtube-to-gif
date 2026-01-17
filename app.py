@@ -29,9 +29,22 @@ else:
     else:
         FFMPEG_BINARY = "ffmpeg" # 預設值
 
-# 啟動時檢查
-if not os.path.exists(LOCAL_FFMPEG) and not shutil.which("ffmpeg"):
-    st.warning("⚠️ 警告：系統找不到 FFmpeg。請確認 packages.txt 是否已包含 ffmpeg 並且位於 GitHub 儲存庫根目錄。")
+# 啟動時檢查並顯示除錯資訊
+st.sidebar.markdown("### 🔧 系統檢查")
+if shutil.which("ffmpeg"):
+    st.sidebar.success(f"FFmpeg found: `{shutil.which('ffmpeg')}`")
+    try:
+        ver_output = subprocess.check_output([FFMPEG_BINARY, "-version"], text=True, stderr=subprocess.STDOUT)
+        st.sidebar.text(f"Version: {ver_output.splitlines()[0]}")
+    except Exception as e:
+        st.sidebar.error(f"Check version failed: {e}")
+else:
+    st.sidebar.error("⚠️ FFmpeg NOT found in system path!")
+    if os.path.exists(LOCAL_FFMPEG):
+        st.sidebar.info(f"Using local binary: {LOCAL_FFMPEG}")
+    else:
+        st.sidebar.warning("Please check packages.txt")
+
 
 
 def process_youtube_to_gif(url, start_time, end_time, width, fps, output_gif):
@@ -62,8 +75,12 @@ def process_youtube_to_gif(url, start_time, end_time, width, fps, output_gif):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             ydl.download([url])
+        try:
+            ydl.download([url])
         except Exception as e:
             st.error(f"下載過程中發生問題：{str(e)}")
+            # 嘗試印出更多 yt-dlp 錯誤資訊
+            st.code(str(e))
             raise e
 
     if not os.path.exists(temp_mp4):
@@ -80,7 +97,15 @@ def process_youtube_to_gif(url, start_time, end_time, width, fps, output_gif):
         "-vf", f"fps={fps},scale={width}:-1:flags=lanczos,palettegen",
         palette_path
     ]
-    subprocess.run(palette_cmd, check=True, capture_output=True)
+        palette_path
+    ]
+    try:
+        subprocess.run(palette_cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        st.error("生成調色盤失敗 (Step 2.1)")
+        st.error(f"錯誤代碼: {e.returncode}")
+        st.code(e.stderr) # 顯示詳細錯誤
+        raise e
     
     # 2. 套用調色盤生成 GIF
     gif_cmd = [
@@ -88,7 +113,13 @@ def process_youtube_to_gif(url, start_time, end_time, width, fps, output_gif):
         "-lavfi", f"fps={fps},scale={width}:-1:flags=lanczos [x]; [x][1:v] paletteuse=dither=sierra2_4a",
         output_gif
     ]
-    subprocess.run(gif_cmd, check=True, capture_output=True)
+    try:
+        subprocess.run(gif_cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        st.error("生成 GIF 失敗 (Step 2.2)")
+        st.error(f"錯誤代碼: {e.returncode}")
+        st.code(e.stderr) # 顯示詳細錯誤
+        raise e
     
     return output_gif
 
