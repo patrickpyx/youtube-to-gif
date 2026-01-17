@@ -1,0 +1,117 @@
+import streamlit as st
+import yt_dlp
+import os
+import tempfile
+import subprocess
+import time
+
+st.set_page_config(page_title="YouTube 轉 GIF 工具 (穩定版)", page_icon="🎞️", layout="wide")
+
+st.title("🎞️ YouTube 影片轉 GIF 工具 (無損核心版)")
+
+# 設置暫存目錄
+if 'temp_dir' not in st.session_state:
+    st.session_state['temp_dir'] = tempfile.mkdtemp()
+temp_dir = st.session_state['temp_dir']
+
+# 取得 FFmpeg 路徑
+# 在本機 Windows 使用 ffmpeg/bin/ffmpeg.exe
+# 在 Streamlit Cloud (Linux) 則直接使用系統安裝的 "ffmpeg"
+LOCAL_FFMPEG = os.path.join(os.getcwd(), "ffmpeg", "bin", "ffmpeg.exe")
+if os.path.exists(LOCAL_FFMPEG):
+    FFMPEG_BINARY = LOCAL_FFMPEG
+else:
+    FFMPEG_BINARY = "ffmpeg"
+
+def process_youtube_to_gif(url, start_time, end_time, width, fps, output_gif):
+    duration = end_time - start_time
+    
+    # 建立下載暫存檔
+    temp_mp4 = os.path.join(temp_dir, "download_clip.mp4")
+    if os.path.exists(temp_mp4):
+        os.remove(temp_mp4)
+        
+    # 步驟 1: 使用 yt-dlp 現代化的 download_ranges 功能進行精確下載
+    st.text(f"Step 1: 正在精確擷取 {start_time}s 到 {end_time}s 的片段...")
+    
+    # download_ranges 是 yt-dlp 官方推薦的最精確切片方式
+    ydl_opts = {
+        'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]',
+        'outtmpl': temp_mp4,
+        'noplaylist': True,
+        'ffmpeg_location': FFMPEG_BINARY,
+        'quiet': True,
+        'download_ranges': lambda info, ydl: [{
+            'start_time': start_time,
+            'end_time': end_time,
+        }],
+        'force_keyframes_at_cuts': True,
+    }
+    
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        try:
+            ydl.download([url])
+        except Exception as e:
+            st.error(f"下載過程中發生問題：{str(e)}")
+            raise e
+
+    if not os.path.exists(temp_mp4):
+        raise Exception("下載失敗，請確認網址是否正確。")
+
+    # 步驟 2: 使用 FFmpeg 轉換為高品質 GIF (使用 Palette 調色盤技術)
+    st.text("Step 2: 正在生成高品質 GIF...")
+    
+    # FFmpeg 高品質 GIF 指令：生成調色盤 -> 套用調色盤
+    # 1. 生成調色盤
+    palette_path = os.path.join(temp_dir, "palette.png")
+    palette_cmd = [
+        FFMPEG_BINARY, "-y", "-i", temp_mp4,
+        "-vf", f"fps={fps},scale={width}:-1:flags=lanczos,palettegen",
+        palette_path
+    ]
+    subprocess.run(palette_cmd, check=True, capture_output=True)
+    
+    # 2. 套用調色盤生成 GIF
+    gif_cmd = [
+        FFMPEG_BINARY, "-y", "-i", temp_mp4, "-i", palette_path,
+        "-lavfi", f"fps={fps},scale={width}:-1:flags=lanczos [x]; [x][1:v] paletteuse=dither=sierra2_4a",
+        output_gif
+    ]
+    subprocess.run(gif_cmd, check=True, capture_output=True)
+    
+    return output_gif
+
+# UI 介面
+url = st.text_input("第一步：貼上 YouTube 網址", placeholder="https://www.youtube.com/watch?v=...")
+
+if url:
+    st.markdown("---")
+    st.subheader("⚙️ 第二步：參數設定")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        start_time = st.number_input("開始時間 (秒)", min_value=0.0, value=0.0, step=0.1)
+        end_time = st.number_input("結束時間 (秒)", min_value=0.1, value=5.0, step=0.1)
+    with col2:
+        gif_width = st.select_slider("解析度 (寬度)", options=[240, 320, 480, 640], value=480)
+        gif_fps = st.slider("幀率 (FPS)", min_value=5, max_value=30, value=12)
+
+    if st.button("🚀 第三步：開始轉換", type="primary"):
+        if end_time <= start_time:
+            st.error("結束時間必須大於開始時間！")
+        else:
+            try:
+                with st.spinner("影片處理中，請稍候... (高品質轉檔較耗時)"):
+                    gif_path = os.path.join(temp_dir, "output.gif")
+                    process_youtube_to_gif(url, start_time, end_time, gif_width, gif_fps, gif_path)
+                    
+                    filesize = os.path.getsize(gif_path) / (1024 * 1024)
+                    st.success(f"✨ 轉換完成！檔案大小：{filesize:.2f} MB")
+                    st.image(gif_path)
+                    
+                    with open(gif_path, "rb") as f:
+                        st.download_button("💾 下載 GIF 檔案", f, file_name="youtube_clip.gif", mime="image/gif")
+            except Exception as e:
+                st.error(f"轉換失敗：{str(e)}")
+else:
+    st.info("請輸入網址開始。")
