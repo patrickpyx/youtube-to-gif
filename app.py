@@ -75,8 +75,6 @@ def process_youtube_to_gif(url, start_time, end_time, width, fps, output_gif):
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             ydl.download([url])
-        try:
-            ydl.download([url])
         except Exception as e:
             st.error(f"下載過程中發生問題：{str(e)}")
             # 嘗試印出更多 yt-dlp 錯誤資訊
@@ -95,8 +93,6 @@ def process_youtube_to_gif(url, start_time, end_time, width, fps, output_gif):
     palette_cmd = [
         FFMPEG_BINARY, "-y", "-i", temp_mp4,
         "-vf", f"fps={fps},scale={width}:-1:flags=lanczos,palettegen",
-        palette_path
-    ]
         palette_path
     ]
     try:
