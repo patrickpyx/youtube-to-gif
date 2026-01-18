@@ -55,31 +55,67 @@ def process_youtube_to_gif(url, start_time, end_time, width, fps, output_gif):
     if os.path.exists(temp_mp4):
         os.remove(temp_mp4)
         
-    # 步驟 1: 使用 yt-dlp 現代化的 download_ranges 功能進行精確下載
-    st.text(f"Step 1: 正在精確擷取 {start_time}s 到 {end_time}s 的片段...")
+    # 步驟 1: 使用 yt-dlp 獲取影片真實連結 (不做下載動作，避免內部轉檔錯誤)
+    st.text(f"Step 1: 正在解析影片連結並進行精確擷取 ({start_time}s ~ {end_time}s)...")
     
-    # download_ranges 是 yt-dlp 官方推薦的最精確切片方式
     ydl_opts = {
-        'format': 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]',
-        'outtmpl': temp_mp4,
+        'format': 'bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]',
         'noplaylist': True,
-        'ffmpeg_location': FFMPEG_BINARY,
         'quiet': True,
-        'download_ranges': lambda info, ydl: [{
-            'start_time': start_time,
-            'end_time': end_time,
-        }],
-        'force_keyframes_at_cuts': True,
     }
-    
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            ydl.download([url])
-        except Exception as e:
-            st.error(f"下載過程中發生問題：{str(e)}")
-            # 嘗試印出更多 yt-dlp 錯誤資訊
-            st.code(str(e))
-            raise e
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            
+            # 取得最佳影片與音訊連結
+            video_url = None
+            audio_url = None
+            
+            # 情況 A: 影片與音訊分開 (Adaptive format)
+            if 'requested_formats' in info:
+                for f in info['requested_formats']:
+                    if f['vcodec'] != 'none':
+                        video_url = f['url']
+                    if f['acodec'] != 'none':
+                        audio_url = f['url']
+            
+            # 情況 B: 單一檔案 (已被合併或原始就是單檔)
+            if not video_url:
+                video_url = info['url']
+                audio_url = info['url'] # 音訊來源同一個
+            
+            # 使用 FFmpeg 直接下載並剪輯 (比 yt-dlp 內建更穩定)
+            # 指令邏輯: input video -> input audio -> trim -> map -> output
+            # 注意: 網路連結作為 input 必須放在 -ss 之後才能精準 seek
+            
+            # 安全檢查
+            if not video_url:
+                raise Exception("無法取得影片連結")
+                
+            st.text("Step 1.5: 正在進行雲端直接串流剪輯 (Bypass yt-dlp downloader)...")
+            
+            dl_cmd = [
+                FFMPEG_BINARY, "-y",
+                "-ss", str(start_time), "-t", str(end_time - start_time), "-i", video_url,
+                "-ss", str(start_time), "-t", str(end_time - start_time), "-i", audio_url,
+                "-map", "0:v", "-map", "1:a",
+                "-c:v", "libx264", "-preset", "ultrafast", # 快速編碼避免超時
+                "-c:a", "aac",
+                temp_mp4
+            ]
+            
+            subprocess.run(dl_cmd, check=True, capture_output=True, text=True)
+
+    except subprocess.CalledProcessError as e:
+        st.error("FFmpeg 下載/剪輯失敗")
+        st.error(f"錯誤代碼: {e.returncode}")
+        st.code(e.stderr)
+        raise e
+    except Exception as e:
+        st.error(f"解析或下載過程中發生問題：{str(e)}")
+        st.code(str(e))
+        raise e
 
     if not os.path.exists(temp_mp4):
         raise Exception("下載失敗，請確認網址是否正確。")
