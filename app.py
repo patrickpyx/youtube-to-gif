@@ -94,13 +94,16 @@ def process_youtube_to_gif(url, start_time, end_time, width, fps, output_gif):
                 raise Exception("無法取得影片連結")
                 
             # 取得 HTTP Header 以繞過 403 Forbidden
-            # 格式化為 FFmpeg 可接受的字串: "User-Agent: xxx\r\nCookie: yyy"
+            # 取得 HTTP Header 以繞過 403 Forbidden
+            # 格式化為 FFmpeg 可接受的字串
             ffmpeg_headers = ""
             if 'http_headers' in info:
                 headers_list = []
                 for k, v in info['http_headers'].items():
-                    headers_list.append(f"{k}: {v}")
-                ffmpeg_headers = "\r\n".join(headers_list)
+                    # 排除可能造成問題的 header
+                    if k.lower() not in ['host', 'content-length', 'connection']:
+                        headers_list.append(f"{k}: {v}")
+                ffmpeg_headers = "\n".join(headers_list) # Linux 環境改用 \n 分隔嘗試
             
             st.text("Step 1.5: 正在進行雲端直接串流剪輯 (Injecting Headers)...")
             
