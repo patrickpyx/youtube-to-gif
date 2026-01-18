@@ -93,17 +93,39 @@ def process_youtube_to_gif(url, start_time, end_time, width, fps, output_gif):
             if not video_url:
                 raise Exception("無法取得影片連結")
                 
-            st.text("Step 1.5: 正在進行雲端直接串流剪輯 (Bypass yt-dlp downloader)...")
+            # 取得 HTTP Header 以繞過 403 Forbidden
+            # 格式化為 FFmpeg 可接受的字串: "User-Agent: xxx\r\nCookie: yyy"
+            ffmpeg_headers = ""
+            if 'http_headers' in info:
+                headers_list = []
+                for k, v in info['http_headers'].items():
+                    headers_list.append(f"{k}: {v}")
+                ffmpeg_headers = "\r\n".join(headers_list)
             
+            st.text("Step 1.5: 正在進行雲端直接串流剪輯 (Injecting Headers)...")
+            
+            # 準備 FFmpeg 指令，針對每個 input 都要加上 headers
             dl_cmd = [
-                FFMPEG_BINARY, "-y",
-                "-ss", str(start_time), "-t", str(end_time - start_time), "-i", video_url,
-                "-ss", str(start_time), "-t", str(end_time - start_time), "-i", audio_url,
+                FFMPEG_BINARY, "-y"
+            ]
+            
+            # Input 1: Video
+            if ffmpeg_headers:
+                dl_cmd.extend(["-headers", ffmpeg_headers])
+            dl_cmd.extend(["-ss", str(start_time), "-t", str(end_time - start_time), "-i", video_url])
+            
+            # Input 2: Audio
+            if ffmpeg_headers:
+                dl_cmd.extend(["-headers", ffmpeg_headers])
+            dl_cmd.extend(["-ss", str(start_time), "-t", str(end_time - start_time), "-i", audio_url])
+            
+            # Output settings
+            dl_cmd.extend([
                 "-map", "0:v", "-map", "1:a",
-                "-c:v", "libx264", "-preset", "ultrafast", # 快速編碼避免超時
+                "-c:v", "libx264", "-preset", "ultrafast",
                 "-c:a", "aac",
                 temp_mp4
-            ]
+            ])
             
             subprocess.run(dl_cmd, check=True, capture_output=True, text=True)
 
